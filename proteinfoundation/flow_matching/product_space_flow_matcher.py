@@ -581,6 +581,8 @@ class ProductSpaceFlowMatcher(L.LightningModule):
                 mode=sampling_model_args[data_mode]["schedule"]["mode"],
                 nsteps=int(nsteps),
                 p1=sampling_model_args[data_mode]["schedule"]["p"],
+                data_mode=data_mode,
+                schedule_cfg=sampling_model_args[data_mode]["schedule"],
             )
             for data_mode in self.data_modes
         }  # each [nsteps + 1], first element is 0, last is 1
@@ -727,11 +729,38 @@ def get_gt(
 
 
 def get_schedule(
-    mode: str, nsteps: int, *, p1: float = None, eps: float = 1e-5
+    mode: str,
+    nsteps: int,
+    *,
+    p1: float = None,
+    eps: float = 1e-5,
+    data_mode: str = None,
+    schedule_cfg: Dict = None,
 ) -> Float[Tensor, "nsteps_p_one"]:
     """
     Gets the partition of the unit interval with points where we'll evaluate the vector field / score.
+
+    The `staged` mode is an addition for the joint-vs-sequential schedule study
+    and is implemented in the `jvs` package (see jvs/schedules.py), outside this
+    fork. It generalizes the modes below to a one-parameter family: each
+    modality ramps over a window of the step budget and is held constant
+    outside it, with `overlap=1.0` reproducing the published per-modality
+    schedules exactly and `overlap=0.0` giving strictly sequential generation.
+    It reads `overlap` and `split` from `schedule_cfg` and uses `data_mode` to
+    pick which modality's published warp shape to ramp with.
     """
+    if mode == "staged":
+        from jvs.schedules import staged_grid
+
+        cfg = schedule_cfg if schedule_cfg is not None else {}
+        t = staged_grid(
+            nsteps=int(nsteps),
+            data_mode=data_mode,
+            overlap=float(cfg.get("overlap", 1.0)),
+            split=float(cfg.get("split", 0.5)),
+            p=None if p1 is None else float(p1),
+        )
+        return torch.from_numpy(t).to(torch.float32)
     if mode == "uniform":
         t = torch.linspace(0, 1, nsteps + 1)
         return t
