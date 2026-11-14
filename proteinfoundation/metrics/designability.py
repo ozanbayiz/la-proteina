@@ -460,22 +460,58 @@ def scRMSD(
                 rec_prot_folding = load_pdb(out_folding)
                 rec_coors = torch.Tensor(rec_prot_folding.atom_positions)
                 rec_mask = torch.Tensor(rec_prot_folding.atom_mask).bool()
-                mask = gen_mask * rec_mask
+
+                gen_coors_cmp, gen_mask_cmp = gen_coors, gen_mask
+                if rec_coors.shape[0] != gen_coors.shape[0]:
+                    # ESMFold occasionally omits a residue from the PDB it
+                    # writes, so the prediction is shorter than the structure
+                    # it folded a sequence for. Unhandled this raises
+                    # "The size of tensor a (100) must match the size of
+                    # tensor b (99)" and kills the whole evaluation run, losing
+                    # every other sample with it. Both proteins carry
+                    # residue_index, so compare the residues they share rather
+                    # than discarding the prediction; a motif evaluation is
+                    # indexed positionally and cannot be re-anchored this way,
+                    # so there the prediction is counted as a failure instead.
+                    shared = sorted(
+                        set(gen_prot.residue_index.tolist())
+                        & set(rec_prot_folding.residue_index.tolist())
+                    )
+                    logger.warning(
+                        f"{name}: folded structure has {rec_coors.shape[0]} residues "
+                        f"vs {gen_coors.shape[0]} generated; comparing the "
+                        f"{len(shared)} shared residues"
+                    )
+                    if motif_residue_indices is not None or not shared:
+                        results[mode][model].append(float("inf"))
+                        if motif_residue_indices is not None:
+                            results[f"{mode}_motif"][model].append(float("inf"))
+                        continue
+                    gen_sel = torch.as_tensor(
+                        [gen_prot.residue_index.tolist().index(r) for r in shared]
+                    )
+                    rec_sel = torch.as_tensor(
+                        [rec_prot_folding.residue_index.tolist().index(r) for r in shared]
+                    )
+                    gen_coors_cmp, gen_mask_cmp = gen_coors[gen_sel], gen_mask[gen_sel]
+                    rec_coors, rec_mask = rec_coors[rec_sel], rec_mask[rec_sel]
+
+                mask = gen_mask_cmp * rec_mask
 
                 # Compute normal RMSD (all residues)
                 normal_rmsd = rmsd_metric(
-                    coors_1_atom37=gen_coors,
+                    coors_1_atom37=gen_coors_cmp,
                     coors_2_atom37=rec_coors,
                     mask_atom_37=mask,
                     mode=mode,
                     residue_indices=None,  # All residues
                 )
                 results[mode][model].append(normal_rmsd)
-                
+
                 # Compute motif RMSD if requested
                 if motif_residue_indices is not None:
                     motif_rmsd = rmsd_metric(
-                        coors_1_atom37=gen_coors,
+                        coors_1_atom37=gen_coors_cmp,
                         coors_2_atom37=rec_coors,
                         mask_atom_37=mask,
                         mode=mode,
