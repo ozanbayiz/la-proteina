@@ -747,17 +747,22 @@ def get_schedule(
     outside it, with `overlap=1.0` reproducing the published per-modality
     schedules exactly and `overlap=0.0` giving strictly sequential generation.
     It reads `overlap` and `split` from `schedule_cfg` and uses `data_mode` to
-    pick which modality's published warp shape to ramp with.
+    pick which modality's published warp shape to ramp with. An optional
+    `warp` in `schedule_cfg` overrides that shape for both modalities --
+    `warp: uniform` ramps each stage linearly in time, which is the natural
+    shape once the stages no longer run concurrently.
     """
     if mode == "staged":
         from jvs.schedules import staged_grid
 
         cfg = schedule_cfg if schedule_cfg is not None else {}
+        warp_mode = cfg.get("warp", None)
         t = staged_grid(
             nsteps=int(nsteps),
             data_mode=data_mode,
             overlap=float(cfg.get("overlap", 1.0)),
             split=float(cfg.get("split", 0.5)),
+            mode=None if warp_mode is None else str(warp_mode),
             p=None if p1 is None else float(p1),
         )
         return torch.from_numpy(t).to(torch.float32)
