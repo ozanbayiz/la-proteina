@@ -748,15 +748,22 @@ def get_schedule(
     schedules exactly and `overlap=0.0` giving strictly sequential generation.
     It reads `overlap` and `split` from `schedule_cfg` and uses `data_mode` to
     pick which modality's published warp shape to ramp with. An optional
-    `warp` in `schedule_cfg` overrides that shape for both modalities --
-    `warp: uniform` ramps each stage linearly in time, which is the natural
-    shape once the stages no longer run concurrently.
+    `warp` in `schedule_cfg` overrides that shape: a string applies to both
+    modalities (`warp: uniform` ramps each stage linearly in time), and a
+    mapping overrides them separately
+    (`warp: {bb_ca: uniform, local_latents: power}`), which matters because
+    the two modalities' noise-injection schedules diverge at t=0 at different
+    rates and their published warps compensate by shrinking dt there.
     """
     if mode == "staged":
         from jvs.schedules import staged_grid
 
         cfg = schedule_cfg if schedule_cfg is not None else {}
         warp_mode = cfg.get("warp", None)
+        if warp_mode is not None and not isinstance(warp_mode, str):
+            # Per-modality mapping; a modality left out keeps its published
+            # shape rather than silently inheriting the other's.
+            warp_mode = dict(warp_mode).get(data_mode, None)
         t = staged_grid(
             nsteps=int(nsteps),
             data_mode=data_mode,
