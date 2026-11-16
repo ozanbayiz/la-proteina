@@ -284,6 +284,12 @@ def compute_traditional_metrics(
                 ret_min=False,
                 tmp_path=tmp_dir,
                 use_pdb_seq=False,
+                # Designability is the dominant GPU cost of evaluation: it
+                # folds num_seq_per_target ProteinMPNN redesigns per sample,
+                # against co-designability's single fold of the generated
+                # sequence. scRMSD has always taken this argument; it was
+                # simply never wired to the config, so every arm paid for 8.
+                num_seq_per_target=cfg_metric.get("num_seq_per_target", 8),
                 rmsd_modes=designability_modes,
                 motif_index=motif_index,  # Fix motif positions if in motif task
                 motif_residue_indices=motif_residue_indices if (designability_motif_eval and needs_motif_setup) else None,
